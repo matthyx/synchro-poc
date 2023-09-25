@@ -5,11 +5,12 @@ import (
 	"os"
 	"os/signal"
 
-	jsonpatch "github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
 	"github.com/matthyx/synchro-poc/domain"
+	"github.com/matthyx/synchro-poc/utils"
 	"github.com/nats-io/nats.go"
 )
 
@@ -35,6 +36,7 @@ func main() {
 			logger.L().Error("cannot unmarshal message", helpers.Error(err))
 		}
 		logger.L().Info("received message", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+		var hash [32]byte
 		switch msg.Type {
 		case domain.Added:
 			resources[msg.Key] = msg.Object
@@ -45,11 +47,12 @@ func main() {
 				return
 			}
 			resources[msg.Key] = modified
-			// FIXME modify response and generate checksum to validate
+			// send checksum for validation
+			hash, _ = utils.CanonicalHash(modified)
 		case domain.Deleted:
 			delete(resources, msg.Key)
 		}
-		err = m.Respond([]byte("OK"))
+		err = m.Respond(hash[:])
 		if err != nil {
 			logger.L().Error("unable to respond to message", helpers.Error(err))
 		}

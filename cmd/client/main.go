@@ -1,19 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	jsonpatch "github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
 	"github.com/matthyx/synchro-poc/domain"
+	"github.com/matthyx/synchro-poc/utils"
 	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -86,6 +89,7 @@ func watchFor(ctx context.Context, res schema.GroupVersionResource) {
 		key := strings.Join([]string{d.GetNamespace(), d.GetName()}, "/")
 		originalObject, knownResource := resources[key]
 		newObject, _ := d.MarshalJSON()
+		newHash, _ := utils.CanonicalHash(newObject)
 		msg := domain.Message{
 			Cluster: "kind-kind",
 			Kind:    res,
@@ -106,15 +110,27 @@ func watchFor(ctx context.Context, res schema.GroupVersionResource) {
 			msg.Type = domain.Added
 			msg.Object = newObject
 		case event.Type == watch.Modified:
-			logger.L().Info("modified resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			// update in known resources
-			resources[key] = newObject
+			logger.L().Info("modified resource", helpers.String("resource", res.Resource), helpers.String("version", d.GetResourceVersion()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 			// create patch
 			patch, err := jsonpatch.CreateMergePatch(originalObject, newObject)
 			if err != nil {
 				// FIXME handle case where patch cannot be created
 				logger.L().Error("cannot create patch", helpers.String("resource", res.Resource), helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				continue
 			}
+			// test patch
+			modified, err := jsonpatch.MergePatch(originalObject, patch)
+			if err != nil {
+				logger.L().Error("cannot merge patch", helpers.Error(err), helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			}
+			modifiedHash, _ := utils.CanonicalHash(modified)
+			if !bytes.Equal(modifiedHash[:], newHash[:]) {
+				logger.L().Error("invalid patch", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				// debug output
+				utils.CompareJson(modified, newObject)
+			}
+			// update in known resources
+			resources[key] = newObject
 			// send modified even
 			msg.Type = domain.Modified
 			msg.Patch = patch
@@ -125,13 +141,15 @@ func watchFor(ctx context.Context, res schema.GroupVersionResource) {
 			continue
 		}
 		resp, err := nc.Request(cfg.Nats.Subject, data, cfg.Nats.Timeout)
-		switch {
-		case err != nil:
+		if err != nil {
 			logger.L().Error("cannot send event", helpers.Error(err), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-		case string(resp.Data) != "OK":
-			logger.L().Error("invalid response from server", helpers.String("resp", string(resp.Data)), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-		default:
-			logger.L().Info("event sent", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+			continue
+		}
+		logger.L().Info("event processed", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+		if event.Type == watch.Modified {
+			if !bytes.Equal(resp.Data, newHash[:]) {
+				logger.L().Error("invalid checksum", helpers.String("got", fmt.Sprintf("%x", resp.Data)), helpers.String("wanted", fmt.Sprintf("%x", newHash)), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+			}
 		}
 	}
 	ctx.Value("wg").(*sync.WaitGroup).Done()

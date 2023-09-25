@@ -3,10 +3,14 @@ module github.com/matthyx/synchro-poc
 go 1.20
 
 require (
-	github.com/evanphx/json-patch v4.12.0+incompatible
+	github.com/SergJa/jsonhash v0.0.0-20210531165746-fc45f346aa74
+	github.com/davecgh/go-spew v1.1.1
+	github.com/evanphx/json-patch/v5 v5.7.0
 	github.com/kubescape/go-logger v0.0.21
 	github.com/nats-io/nats.go v1.30.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/viper v1.16.0
+	github.com/stretchr/testify v1.8.4
 	k8s.io/apimachinery v0.28.2
 	k8s.io/client-go v0.28.2
 )
@@ -14,7 +18,6 @@ require (
 require (
 	github.com/briandowns/spinner v1.23.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
