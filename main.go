@@ -6,6 +6,7 @@ import (
 	"flag"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -57,17 +58,11 @@ func newClient() (dynamic.Interface, error) {
 	return dynClient, nil
 }
 
-func main() {
-	client, err := newClient()
+func watchFor(ctx context.Context, res schema.GroupVersionResource) {
+	resources := map[string]unstructured.Unstructured{}
+	watcher, err := ctx.Value("client").(dynamic.Interface).Resource(res).Namespace("").Watch(ctx, metav1.ListOptions{})
 	if err != nil {
-		logger.L().Fatal("unable to create client", helpers.Error(err))
-	}
-	deploymentRes := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
-	ctx := context.Background()
-	deployments := map[string]unstructured.Unstructured{}
-	watcher, err := client.Resource(deploymentRes).Namespace("").Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		logger.L().Fatal("unable to watch for deployments", helpers.Error(err))
+		logger.L().Fatal("unable to watch for resources", helpers.String("resource", res.Resource), helpers.Error(err))
 	}
 	for {
 		event, chanActive := <-watcher.ResultChan()
@@ -76,7 +71,7 @@ func main() {
 			break
 		}
 		if event.Type == watch.Error {
-			logger.L().Error("watch event failed", helpers.Interface("event", event))
+			logger.L().Error("watch event failed", helpers.String("resource", res.Resource), helpers.Interface("event", event))
 			watcher.Stop()
 			break
 		}
@@ -87,22 +82,43 @@ func main() {
 		key := strings.Join([]string{d.GetNamespace(), d.GetName()}, "/")
 		switch event.Type {
 		case watch.Added:
-			logger.L().Info("added deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			deployments[key] = *d
+			logger.L().Info("added resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			resources[key] = *d
 		case watch.Modified:
-			logger.L().Info("modified deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			if u, ok := deployments[key]; ok {
+			logger.L().Info("modified resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			if u, ok := resources[key]; ok {
 				source, _ := u.MarshalJSON()
 				target, _ := d.MarshalJSON()
 				patch, err := jsondiff.CompareJSON(source, target)
 				if err != nil {
-					logger.L().Error("cannot create patch", helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+					logger.L().Error("cannot create patch", helpers.String("resource", res.Resource), helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 				}
-				logger.L().Info("new patch", helpers.String("content", patch.String()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				logger.L().Info("new patch", helpers.String("resource", res.Resource), helpers.String("content", patch.String()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 			}
 		case watch.Deleted:
-			logger.L().Info("deleted deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			delete(deployments, key)
+			logger.L().Info("deleted resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			delete(resources, key)
 		}
 	}
+	ctx.Value("wg").(*sync.WaitGroup).Done()
+}
+
+func main() {
+	ctx := context.Background()
+	client, err := newClient()
+	if err != nil {
+		logger.L().Fatal("unable to create client", helpers.Error(err))
+	}
+	ctx = context.WithValue(ctx, "client", client)
+	var wg sync.WaitGroup
+	ctx = context.WithValue(ctx, "wg", &wg)
+	resources := []schema.GroupVersionResource{
+		{Group: "apps", Version: "v1", Resource: "deployments"},
+		{Group: "", Version: "v1", Resource: "pods"},
+	}
+	for _, res := range resources {
+		wg.Add(1)
+		go watchFor(ctx, res)
+	}
+	wg.Wait()
 }
