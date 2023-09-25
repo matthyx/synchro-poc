@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/nats-io/nats.go"
 	"github.com/wI2L/jsondiff"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +22,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+)
+
+const (
+	natsSubject = "sync"
+	natsTimeout = 2 * time.Second
+	natsUrls    = "192.168.88.250"
 )
 
 func getConfig() (*rest.Config, error) {
@@ -93,7 +101,15 @@ func watchFor(ctx context.Context, res schema.GroupVersionResource) {
 				if err != nil {
 					logger.L().Error("cannot create patch", helpers.String("resource", res.Resource), helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 				}
-				logger.L().Info("new patch", helpers.String("resource", res.Resource), helpers.String("content", patch.String()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				msg, err := ctx.Value("nc").(*nats.Conn).Request(natsSubject, []byte(patch.String()), natsTimeout)
+				switch {
+				case err != nil:
+					logger.L().Error("cannot send patch", helpers.String("resource", res.Resource), helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				case string(msg.Data) != "OK":
+					logger.L().Error("invalid response for patch", helpers.String("resource", res.Resource), helpers.String("msg", string(msg.Data)), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				default:
+					logger.L().Info("sent patch", helpers.String("resource", res.Resource), helpers.Int("size", len(patch.String())), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+				}
 			}
 		case watch.Deleted:
 			logger.L().Info("deleted resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
@@ -105,11 +121,20 @@ func watchFor(ctx context.Context, res schema.GroupVersionResource) {
 
 func main() {
 	ctx := context.Background()
+	// k8s client
 	client, err := newClient()
 	if err != nil {
-		logger.L().Fatal("unable to create client", helpers.Error(err))
+		logger.L().Fatal("unable to create k8s client", helpers.Error(err))
 	}
 	ctx = context.WithValue(ctx, "client", client)
+	// nats client
+	nc, err := nats.Connect(natsUrls)
+	if err != nil {
+		logger.L().Fatal("unable to create nats client", helpers.Error(err))
+	}
+	defer nc.Close()
+	ctx = context.WithValue(ctx, "nc", nc)
+	// wait group
 	var wg sync.WaitGroup
 	ctx = context.WithValue(ctx, "wg", &wg)
 	resources := []schema.GroupVersionResource{
