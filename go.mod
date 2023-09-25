@@ -3,8 +3,10 @@ module github.com/matthyx/synchro-poc
 go 1.20
 
 require (
+	github.com/evanphx/json-patch v4.12.0+incompatible
 	github.com/kubescape/go-logger v0.0.21
-	github.com/wI2L/jsondiff v0.4.0
+	github.com/nats-io/nats.go v1.30.0
+	github.com/spf13/viper v1.16.0
 	k8s.io/apimachinery v0.28.2
 	k8s.io/client-go v0.28.2
 )
@@ -31,15 +33,15 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/nats-io/nats.go v1.30.0 // indirect
+	github.com/nats-io/nats-server/v2 v2.10.1 // indirect
 	github.com/nats-io/nkeys v0.4.5 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.8 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/afero v1.9.5 // indirect
 	github.com/spf13/cast v1.5.1 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/spf13/viper v1.16.0 // indirect
 	github.com/subosito/gotenv v1.4.2 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.2 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.2 // indirect

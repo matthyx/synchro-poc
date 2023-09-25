@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/signal"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
+	"github.com/matthyx/synchro-poc/domain"
 	"github.com/nats-io/nats.go"
 )
 
@@ -22,10 +25,31 @@ func main() {
 		logger.L().Fatal("unable to create NATS client", helpers.Error(err), helpers.String("urls", cfg.Nats.Urls))
 	}
 	defer nc.Close()
+	// store resources in a map
+	resources := map[string][]byte{}
 	// subscribe to nats subject
 	subscription, err := nc.Subscribe(cfg.Nats.Subject, func(m *nats.Msg) {
-		logger.L().Info("received message", helpers.String("msg", string(m.Data)))
-		err := m.Respond([]byte("OK"))
+		var msg domain.Message
+		err := json.Unmarshal(m.Data, &msg)
+		if err != nil {
+			logger.L().Error("cannot unmarshal message", helpers.Error(err))
+		}
+		logger.L().Info("received message", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+		switch msg.Type {
+		case domain.Added:
+			resources[msg.Key] = msg.Object
+		case domain.Modified:
+			modified, err := jsonpatch.MergePatch(resources[msg.Key], msg.Patch)
+			if err != nil {
+				logger.L().Error("cannot merge patch", helpers.Error(err))
+				return
+			}
+			resources[msg.Key] = modified
+			// FIXME modify response and generate checksum to validate
+		case domain.Deleted:
+			delete(resources, msg.Key)
+		}
+		err = m.Respond([]byte("OK"))
 		if err != nil {
 			logger.L().Error("unable to respond to message", helpers.Error(err))
 		}
