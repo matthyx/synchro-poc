@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -64,7 +65,7 @@ func main() {
 	deploymentRes := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 	ctx := context.Background()
 	deployments := map[string]unstructured.Unstructured{}
-	watcher, err := client.Resource(deploymentRes).Namespace("default").Watch(ctx, metav1.ListOptions{})
+	watcher, err := client.Resource(deploymentRes).Namespace("").Watch(ctx, metav1.ListOptions{})
 	if err != nil {
 		logger.L().Fatal("unable to watch for deployments", helpers.Error(err))
 	}
@@ -83,24 +84,25 @@ func main() {
 		if !ok {
 			continue
 		}
+		key := strings.Join([]string{d.GetNamespace(), d.GetName()}, "/")
 		switch event.Type {
 		case watch.Added:
-			logger.L().Info("added deployment", helpers.String("name", d.GetName()))
-			deployments[d.GetName()] = *d
+			logger.L().Info("added deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			deployments[key] = *d
 		case watch.Modified:
-			logger.L().Info("modified deployment", helpers.String("name", d.GetName()))
-			if u, ok := deployments[d.GetName()]; ok {
+			logger.L().Info("modified deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			if u, ok := deployments[key]; ok {
 				source, _ := u.MarshalJSON()
 				target, _ := d.MarshalJSON()
 				patch, err := jsondiff.CompareJSON(source, target)
 				if err != nil {
-					logger.L().Error("cannot create patch", helpers.Error(err))
+					logger.L().Error("cannot create patch", helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 				}
-				logger.L().Info("patch", helpers.String("name", patch.String()))
+				logger.L().Info("new patch", helpers.String("content", patch.String()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
 			}
 		case watch.Deleted:
-			logger.L().Info("deleted deployment", helpers.String("name", d.GetName()))
-			delete(deployments, d.GetName())
+			logger.L().Info("deleted deployment", helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
+			delete(deployments, key)
 		}
 	}
 }
