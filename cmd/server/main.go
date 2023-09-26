@@ -51,6 +51,8 @@ func main() {
 			hash, _ = utils.CanonicalHash(modified)
 		case domain.Deleted:
 			delete(resources, msg.Key)
+		case domain.Checksum:
+			hash, _ = utils.CanonicalHash(resources[msg.Key])
 		}
 		err = m.Respond(hash[:])
 		if err != nil {

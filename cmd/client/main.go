@@ -1,28 +1,18 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 
-	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
-	"github.com/matthyx/synchro-poc/domain"
-	"github.com/matthyx/synchro-poc/utils"
+	"github.com/matthyx/synchro-poc/synchro"
 	"github.com/nats-io/nats.go"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
-
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -63,98 +53,6 @@ func newClient() (dynamic.Interface, error) {
 	return dynClient, nil
 }
 
-func watchFor(ctx context.Context, res schema.GroupVersionResource) {
-	resources := map[string][]byte{}
-	cfg := ctx.Value("cfg").(config.Config)
-	nc := ctx.Value("nc").(*nats.Conn)
-	watcher, err := ctx.Value("client").(dynamic.Interface).Resource(res).Namespace("").Watch(ctx, metav1.ListOptions{})
-	if err != nil {
-		logger.L().Fatal("unable to watch for resources", helpers.String("resource", res.Resource), helpers.Error(err))
-	}
-	for {
-		event, chanActive := <-watcher.ResultChan()
-		if !chanActive {
-			watcher.Stop()
-			break
-		}
-		if event.Type == watch.Error {
-			logger.L().Error("watch event failed", helpers.String("resource", res.Resource), helpers.Interface("event", event))
-			watcher.Stop()
-			break
-		}
-		d, ok := event.Object.(*unstructured.Unstructured)
-		if !ok {
-			continue
-		}
-		key := strings.Join([]string{d.GetNamespace(), d.GetName()}, "/")
-		originalObject, knownResource := resources[key]
-		newObject, _ := d.MarshalJSON()
-		newHash, _ := utils.CanonicalHash(newObject)
-		msg := domain.Message{
-			Cluster: "kind-kind",
-			Kind:    res,
-			Key:     key,
-		}
-		switch {
-		case event.Type == watch.Deleted:
-			logger.L().Info("deleted resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			// remove from known resources
-			delete(resources, key)
-			// send deleted event
-			msg.Type = domain.Deleted
-		case event.Type == watch.Added || !knownResource:
-			logger.L().Info("added resource", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			// add to known resources
-			resources[key] = newObject
-			// send added event
-			msg.Type = domain.Added
-			msg.Object = newObject
-		case event.Type == watch.Modified:
-			logger.L().Info("modified resource", helpers.String("resource", res.Resource), helpers.String("version", d.GetResourceVersion()), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			// create patch
-			patch, err := jsonpatch.CreateMergePatch(originalObject, newObject)
-			if err != nil {
-				// FIXME handle case where patch cannot be created
-				logger.L().Error("cannot create patch", helpers.String("resource", res.Resource), helpers.Error(err), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-				continue
-			}
-			// test patch
-			modified, err := jsonpatch.MergePatch(originalObject, patch)
-			if err != nil {
-				logger.L().Error("cannot merge patch", helpers.Error(err), helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-			}
-			modifiedHash, _ := utils.CanonicalHash(modified)
-			if !bytes.Equal(modifiedHash[:], newHash[:]) {
-				logger.L().Error("invalid patch", helpers.String("resource", res.Resource), helpers.String("name", d.GetName()), helpers.String("namespace", d.GetNamespace()))
-				// debug output
-				utils.CompareJson(modified, newObject)
-			}
-			// update in known resources
-			resources[key] = newObject
-			// send modified even
-			msg.Type = domain.Modified
-			msg.Patch = patch
-		}
-		data, err := json.Marshal(&msg)
-		if err != nil {
-			logger.L().Error("cannot marshal event", helpers.Error(err), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-			continue
-		}
-		resp, err := nc.Request(cfg.Nats.Subject, data, cfg.Nats.Timeout)
-		if err != nil {
-			logger.L().Error("cannot send event", helpers.Error(err), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-			continue
-		}
-		logger.L().Info("event processed", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-		if event.Type == watch.Modified {
-			if !bytes.Equal(resp.Data, newHash[:]) {
-				logger.L().Error("invalid checksum", helpers.String("got", fmt.Sprintf("%x", resp.Data)), helpers.String("wanted", fmt.Sprintf("%x", newHash)), helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-			}
-		}
-	}
-	ctx.Value("wg").(*sync.WaitGroup).Done()
-}
-
 func main() {
 	ctx := context.Background()
 	// config
@@ -184,8 +82,9 @@ func main() {
 		{Group: "", Version: "v1", Resource: "pods"},
 	}
 	for _, res := range resources {
+		syncClient := synchro.NewClient(cfg, client, nc, res)
 		wg.Add(1)
-		go watchFor(ctx, res)
+		go syncClient.Run(&wg)
 	}
 	wg.Wait()
 }

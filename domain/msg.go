@@ -11,6 +11,7 @@ const (
 	Added    EventType = "ADDED"
 	Modified EventType = "MODIFIED"
 	Deleted  EventType = "DELETED"
+	Checksum EventType = "CHECKSUM"
 )
 
 type Message struct {

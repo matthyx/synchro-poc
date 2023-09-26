@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	Nats NatsConfig `mapstructure:"nats"`
+	Cluster string     `mapstructure:"cluster"`
+	Nats    NatsConfig `mapstructure:"nats"`
 }
 
 type NatsConfig struct {
