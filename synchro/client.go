@@ -155,14 +155,6 @@ func (c *Client) sendDeleted(key string) error {
 	return nil
 }
 
-func (c *Client) sendMessage(msg domain.Message) (*nats.Msg, error) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
-	return c.nc.Request(c.cfg.Nats.Subject, data, c.cfg.Nats.Timeout)
-}
-
 func (c *Client) sendModified(key string, patch []byte) (*nats.Msg, error) {
 	msg := domain.Message{
 		Cluster: c.cfg.Cluster,
@@ -177,6 +169,21 @@ func (c *Client) sendModified(key string, patch []byte) (*nats.Msg, error) {
 	}
 	logger.L().Info("sent modified message", helpers.String("resource", c.res.Resource), helpers.String("key", key))
 	return resp, nil
+}
+
+// https://github.com/mantil-io/mantil/blob/89d864c4ca601dc912cf3086fa459761c28d850f/cli/log/net/publisher.go
+func (c *Client) sendMessage(msg domain.Message) (*nats.Msg, error) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	chunks, last := utils.SplitIntoMsgs(data, c.cfg.Nats.Subject, int(c.nc.MaxPayload())-100)
+	for _, chunk := range chunks {
+		if _, err := c.nc.RequestMsg(chunk, c.cfg.Nats.Timeout); err != nil {
+			return nil, err
+		}
+	}
+	return c.nc.RequestMsg(last, c.cfg.Nats.Timeout)
 }
 
 func (c *Client) Run(wg *sync.WaitGroup) {

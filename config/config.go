@@ -33,7 +33,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigType("json")
 
 	viper.SetDefault("nats.subject", "sync")
-	viper.SetDefault("nats.timeout", 2*time.Second)
+	viper.SetDefault("nats.timeout", 5*time.Second)
 
 	viper.AutomaticEnv()
 

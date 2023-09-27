@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/signal"
@@ -13,6 +14,8 @@ import (
 	"github.com/matthyx/synchro-poc/utils"
 	"github.com/nats-io/nats.go"
 )
+
+var chunks = map[string][][]byte{}
 
 func main() {
 	// config
@@ -30,29 +33,35 @@ func main() {
 	resources := map[string][]byte{}
 	// subscribe to nats subject
 	subscription, err := nc.Subscribe(cfg.Nats.Subject, func(m *nats.Msg) {
-		var msg domain.Message
-		err := json.Unmarshal(m.Data, &msg)
-		if err != nil {
-			logger.L().Error("cannot unmarshal message", helpers.Error(err))
-		}
-		logger.L().Info("received message", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+		id := utils.ChunkID(m)
+		pushChunk(id, m.Data)
+		// if last chunk, we should reassemble the message
 		var hash [32]byte
-		switch msg.Type {
-		case domain.Added:
-			resources[msg.Key] = msg.Object
-		case domain.Modified:
-			modified, err := jsonpatch.MergePatch(resources[msg.Key], msg.Patch)
+		if utils.IsLastChunk(m) {
+			// unmarshal message
+			var msg domain.Message
+			err := json.Unmarshal(popChunk(id), &msg)
 			if err != nil {
-				logger.L().Error("cannot merge patch", helpers.Error(err))
-				return
+				logger.L().Error("cannot unmarshal message", helpers.Error(err))
 			}
-			resources[msg.Key] = modified
-			// send checksum for validation
-			hash, _ = utils.CanonicalHash(modified)
-		case domain.Deleted:
-			delete(resources, msg.Key)
-		case domain.Checksum:
-			hash, _ = utils.CanonicalHash(resources[msg.Key])
+			logger.L().Info("received message", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
+			switch msg.Type {
+			case domain.Added:
+				resources[msg.Key] = msg.Object
+			case domain.Modified:
+				modified, err := jsonpatch.MergePatch(resources[msg.Key], msg.Patch)
+				if err != nil {
+					logger.L().Error("cannot merge patch", helpers.Error(err))
+					return
+				}
+				resources[msg.Key] = modified
+				// send checksum for validation
+				hash, _ = utils.CanonicalHash(modified)
+			case domain.Deleted:
+				delete(resources, msg.Key)
+			case domain.Checksum:
+				hash, _ = utils.CanonicalHash(resources[msg.Key])
+			}
 		}
 		err = m.Respond(hash[:])
 		if err != nil {
@@ -77,4 +86,16 @@ func main() {
 	logger.L().Info("received interrupt, draining...")
 	_ = nc.Drain()
 	logger.L().Fatal("Exiting")
+}
+
+func pushChunk(id string, payload []byte) {
+	logger.L().Info("received chunk", helpers.String("id", id))
+	chunks[id] = append(chunks[id], payload)
+}
+
+func popChunk(id string) []byte {
+	logger.L().Info("popping chunks", helpers.String("id", id))
+	payload := bytes.Join(chunks[id], []byte{})
+	delete(chunks, id)
+	return payload
 }
