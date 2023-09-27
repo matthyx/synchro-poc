@@ -28,21 +28,26 @@ type Client struct {
 	nc        *nats.Conn
 	res       schema.GroupVersionResource
 	resources map[string][]byte
+	strategy  domain.Strategy
 }
 
-func NewClient(cfg config.Config, client dynamic.Interface, nc *nats.Conn, res schema.GroupVersionResource) *Client {
+func NewClient(cfg config.Config, client dynamic.Interface, nc *nats.Conn, r config.Resource) *Client {
+	res := schema.GroupVersionResource{Group: r.Group, Version: r.Version, Resource: r.Resource}
 	return &Client{
 		cfg:       cfg,
 		client:    client,
 		nc:        nc,
 		res:       res,
 		resources: map[string][]byte{},
+		strategy:  r.Strategy,
 	}
 }
 
 func (c *Client) handleAdded(key string, newObject []byte) error {
-	// add to known resources
-	c.resources[key] = newObject
+	if c.strategy == domain.Patch {
+		// add to known resources
+		c.resources[key] = newObject
+	}
 	// request checksum
 	checksum, _ := c.requestChecksum(key)
 	// compare with local checksum
@@ -55,17 +60,21 @@ func (c *Client) handleAdded(key string, newObject []byte) error {
 }
 
 func (c *Client) handleDeleted(key string) error {
-	// remove from known resources
-	delete(c.resources, key)
+	if c.strategy == domain.Patch {
+		// remove from known resources
+		delete(c.resources, key)
+	}
 	// send deleted event
 	return c.sendDeleted(key)
 }
 
 func (c *Client) handleModified(key string, newObject []byte) error {
-	// update in known resources
-	defer func() {
-		c.resources[key] = newObject
-	}()
+	if c.strategy == domain.Patch {
+		// update in known resources
+		defer func() {
+			c.resources[key] = newObject
+		}()
+	}
 	// check if resource is known
 	if originalObject, knownResource := c.resources[key]; knownResource {
 		// request checksum

@@ -12,7 +12,6 @@ import (
 	"github.com/matthyx/synchro-poc/config"
 	"github.com/matthyx/synchro-poc/synchro"
 	"github.com/nats-io/nats.go"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -77,12 +76,8 @@ func main() {
 	// wait group
 	var wg sync.WaitGroup
 	ctx = context.WithValue(ctx, "wg", &wg)
-	resources := []schema.GroupVersionResource{
-		{Group: "apps", Version: "v1", Resource: "deployments"},
-		{Group: "", Version: "v1", Resource: "pods"},
-	}
-	for _, res := range resources {
-		syncClient := synchro.NewClient(cfg, client, nc, res)
+	for _, r := range cfg.Resources {
+		syncClient := synchro.NewClient(cfg, client, nc, r)
 		wg.Add(1)
 		go syncClient.Run(&wg)
 	}
