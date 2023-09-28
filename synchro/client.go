@@ -187,7 +187,24 @@ func (c *Client) sendMessage(msg domain.Message) (*nats.Msg, error) {
 }
 
 func (c *Client) Run(wg *sync.WaitGroup) {
-	watcher, err := c.client.Resource(c.res).Namespace("").Watch(context.Background(), metav1.ListOptions{})
+	list, err := c.client.Resource(c.res).Namespace("").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return
+	}
+	for _, d := range list.Items {
+		key := strings.Join([]string{d.GetNamespace(), d.GetName()}, "/")
+		newObject, err := d.MarshalJSON()
+		if err != nil {
+			logger.L().Error("cannot marshal object", helpers.Error(err), helpers.String("resource", c.res.Resource), helpers.String("key", key))
+			continue
+		}
+		err = c.handleAdded(key, newObject)
+		if err != nil {
+			logger.L().Error("cannot handle added resource", helpers.Error(err), helpers.String("resource", c.res.Resource), helpers.String("key", key))
+			continue
+		}
+	}
+	watcher, err := c.client.Resource(c.res).Namespace("").Watch(context.Background(), metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
 	if err != nil {
 		logger.L().Fatal("unable to watch for resources", helpers.String("resource", c.res.Resource), helpers.Error(err))
 	}
