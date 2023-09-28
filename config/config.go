@@ -1,22 +1,13 @@
 package config
 
 import (
-	"time"
-
 	"github.com/matthyx/synchro-poc/domain"
 	"github.com/spf13/viper"
 )
 
 type Config struct {
 	Cluster   string     `mapstructure:"cluster"`
-	Nats      NatsConfig `mapstructure:"nats"`
 	Resources []Resource `mapstructure:"resources"`
-}
-
-type NatsConfig struct {
-	Subject string        `mapstructure:"subject"`
-	Timeout time.Duration `mapstructure:"timeout"`
-	Urls    string        `mapstructure:"urls"`
 }
 
 type Resource struct {
@@ -31,9 +22,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
-
-	viper.SetDefault("nats.subject", "sync")
-	viper.SetDefault("nats.timeout", 5*time.Second)
 
 	viper.AutomaticEnv()
 

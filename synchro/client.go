@@ -5,16 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	"github.com/gobwas/ws"
+	"github.com/gobwas/ws/wsutil"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
 	"github.com/matthyx/synchro-poc/domain"
 	"github.com/matthyx/synchro-poc/utils"
-	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -25,18 +27,18 @@ import (
 type Client struct {
 	cfg       config.Config
 	client    dynamic.Interface
-	nc        *nats.Conn
+	conn      net.Conn
 	res       schema.GroupVersionResource
 	resources map[string][]byte
 	strategy  domain.Strategy
 }
 
-func NewClient(cfg config.Config, client dynamic.Interface, nc *nats.Conn, r config.Resource) *Client {
+func NewClient(cfg config.Config, client dynamic.Interface, conn net.Conn, r config.Resource) *Client {
 	res := schema.GroupVersionResource{Group: r.Group, Version: r.Version, Resource: r.Resource}
 	return &Client{
 		cfg:       cfg,
 		client:    client,
-		nc:        nc,
+		conn:      conn,
 		res:       res,
 		resources: map[string][]byte{},
 		strategy:  r.Strategy,
@@ -97,7 +99,7 @@ func (c *Client) handleModified(key string, newObject []byte) error {
 		}
 		// compare checksum
 		newExpected, _ := utils.CanonicalHash(newObject)
-		if !bytes.Equal(resp.Data, newExpected[:]) {
+		if !bytes.Equal(resp, newExpected[:]) {
 			// checksum mismatch, send added event
 			return c.sendAdded(key, newObject)
 		}
@@ -120,8 +122,8 @@ func (c *Client) requestChecksum(key string) ([]byte, error) {
 		logger.L().Error("error during checksum request", helpers.Error(err), helpers.String("resource", c.res.Resource), helpers.String("key", key))
 		return nil, err
 	}
-	logger.L().Info("got checksum", helpers.String("checksum", fmt.Sprintf("%x", resp.Data)), helpers.String("resource", c.res.Resource), helpers.String("key", key))
-	return resp.Data, nil
+	logger.L().Info("got checksum", helpers.String("checksum", fmt.Sprintf("%x", resp)), helpers.String("resource", c.res.Resource), helpers.String("key", key))
+	return resp, nil
 }
 
 func (c *Client) sendAdded(key string, newObject []byte) error {
@@ -155,7 +157,7 @@ func (c *Client) sendDeleted(key string) error {
 	return nil
 }
 
-func (c *Client) sendModified(key string, patch []byte) (*nats.Msg, error) {
+func (c *Client) sendModified(key string, patch []byte) ([]byte, error) {
 	msg := domain.Message{
 		Cluster: c.cfg.Cluster,
 		Kind:    c.res,
@@ -171,19 +173,17 @@ func (c *Client) sendModified(key string, patch []byte) (*nats.Msg, error) {
 	return resp, nil
 }
 
-// https://github.com/mantil-io/mantil/blob/89d864c4ca601dc912cf3086fa459761c28d850f/cli/log/net/publisher.go
-func (c *Client) sendMessage(msg domain.Message) (*nats.Msg, error) {
+func (c *Client) sendMessage(msg domain.Message) ([]byte, error) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}
-	chunks, last := utils.SplitIntoMsgs(data, c.cfg.Nats.Subject, int(c.nc.MaxPayload())-100)
-	for _, chunk := range chunks {
-		if _, err := c.nc.RequestMsg(chunk, c.cfg.Nats.Timeout); err != nil {
-			return nil, err
-		}
+	err = wsutil.WriteClientMessage(c.conn, ws.OpBinary, data)
+	if err != nil {
+		return nil, err
 	}
-	return c.nc.RequestMsg(last, c.cfg.Nats.Timeout)
+	resp, _, err := wsutil.ReadServerData(c.conn)
+	return resp, err
 }
 
 func (c *Client) Run(wg *sync.WaitGroup) {

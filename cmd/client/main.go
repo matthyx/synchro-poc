@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/gobwas/ws"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/config"
 	"github.com/matthyx/synchro-poc/synchro"
-	"github.com/nats-io/nats.go"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -53,31 +53,26 @@ func newClient() (dynamic.Interface, error) {
 }
 
 func main() {
-	ctx := context.Background()
 	// config
 	cfg, err := config.LoadConfig("./configuration")
 	if err != nil {
 		logger.L().Fatal("unable to load configuration", helpers.Error(err))
 	}
-	ctx = context.WithValue(ctx, "cfg", cfg)
 	// k8s client
 	client, err := newClient()
 	if err != nil {
 		logger.L().Fatal("unable to create k8s client", helpers.Error(err))
 	}
-	ctx = context.WithValue(ctx, "client", client)
-	// nats client
-	nc, err := nats.Connect(cfg.Nats.Urls)
+	// websocket client
+	conn, _, _, err := ws.DefaultDialer.Dial(context.Background(), "ws://127.0.0.1:8080/")
 	if err != nil {
-		logger.L().Fatal("unable to create NATS client", helpers.Error(err), helpers.String("urls", cfg.Nats.Urls))
+		logger.L().Fatal("unable to create websocket connection", helpers.Error(err))
 	}
-	defer nc.Close()
-	ctx = context.WithValue(ctx, "nc", nc)
+	defer conn.Close()
 	// wait group
 	var wg sync.WaitGroup
-	ctx = context.WithValue(ctx, "wg", &wg)
 	for _, r := range cfg.Resources {
-		syncClient := synchro.NewClient(cfg, client, nc, r)
+		syncClient := synchro.NewClient(cfg, client, conn, r)
 		wg.Add(1)
 		go syncClient.Run(&wg)
 	}
