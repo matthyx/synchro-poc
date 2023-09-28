@@ -21,6 +21,12 @@
       "version": "v1beta1",
       "resource": "sbomspdxv2p3s",
       "strategy": "copy"
+    },
+    {
+      "group": "spdx.softwarecomposition.kubescape.io",
+      "version": "v1beta1",
+      "resource": "sbomspdxv2p3filtereds",
+      "strategy": "copy"
     }
   ]
 }
