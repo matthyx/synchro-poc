@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -46,7 +45,7 @@ func NewClient(cfg config.Config, client dynamic.Interface, conn net.Conn, r con
 }
 
 func (c *Client) handleAdded(key string, newObject []byte) error {
-	if c.strategy == domain.Patch {
+	if c.strategy == domain.PatchStrategy {
 		// add to known resources
 		c.resources[key] = newObject
 	}
@@ -62,7 +61,7 @@ func (c *Client) handleAdded(key string, newObject []byte) error {
 }
 
 func (c *Client) handleDeleted(key string) error {
-	if c.strategy == domain.Patch {
+	if c.strategy == domain.PatchStrategy {
 		// remove from known resources
 		delete(c.resources, key)
 	}
@@ -71,7 +70,7 @@ func (c *Client) handleDeleted(key string) error {
 }
 
 func (c *Client) handleModified(key string, newObject []byte) error {
-	if c.strategy == domain.Patch {
+	if c.strategy == domain.PatchStrategy {
 		// update in known resources
 		defer func() {
 			c.resources[key] = newObject
@@ -111,28 +110,21 @@ func (c *Client) handleModified(key string, newObject []byte) error {
 }
 
 func (c *Client) requestChecksum(key string) ([]byte, error) {
-	msg := domain.Message{
-		Cluster: c.cfg.Cluster,
-		Kind:    c.res,
-		Key:     key,
-		Type:    domain.Checksum,
-	}
-	resp, err := c.sendMessage(msg)
-	if err != nil {
-		logger.L().Error("error during checksum request", helpers.Error(err), helpers.String("resource", c.res.Resource), helpers.String("key", key))
-		return nil, err
-	}
-	logger.L().Info("got checksum", helpers.String("checksum", fmt.Sprintf("%x", resp)), helpers.String("resource", c.res.Resource), helpers.String("key", key))
-	return resp, nil
+	return nil, nil
 }
 
 func (c *Client) sendAdded(key string, newObject []byte) error {
-	msg := domain.Message{
+	event := domain.EventAdd
+	msg := domain.Add{
 		Cluster: c.cfg.Cluster,
-		Kind:    c.res,
-		Key:     key,
-		Type:    domain.Added,
-		Object:  newObject,
+		Kind: &domain.Kind{
+			Group:    c.res.Group,
+			Version:  c.res.Version,
+			Resource: c.res.Resource,
+		},
+		Name:   key,
+		Event:  &event,
+		Object: string(newObject),
 	}
 	_, err := c.sendMessage(msg)
 	if err != nil {
@@ -143,11 +135,16 @@ func (c *Client) sendAdded(key string, newObject []byte) error {
 }
 
 func (c *Client) sendDeleted(key string) error {
-	msg := domain.Message{
+	event := domain.EventDelete
+	msg := domain.Delete{
 		Cluster: c.cfg.Cluster,
-		Kind:    c.res,
-		Key:     key,
-		Type:    domain.Deleted,
+		Kind: &domain.Kind{
+			Group:    c.res.Group,
+			Version:  c.res.Version,
+			Resource: c.res.Resource,
+		},
+		Name:  key,
+		Event: &event,
 	}
 	_, err := c.sendMessage(msg)
 	if err != nil {
@@ -158,19 +155,7 @@ func (c *Client) sendDeleted(key string) error {
 }
 
 func (c *Client) sendModified(key string, patch []byte) ([]byte, error) {
-	msg := domain.Message{
-		Cluster: c.cfg.Cluster,
-		Kind:    c.res,
-		Key:     key,
-		Type:    domain.Modified,
-		Patch:   patch,
-	}
-	resp, err := c.sendMessage(msg)
-	if err != nil {
-		return nil, err
-	}
-	logger.L().Info("sent modified message", helpers.String("resource", c.res.Resource), helpers.String("key", key))
-	return resp, nil
+	return nil, nil
 }
 
 func (c *Client) sendMessage(msg domain.Message) ([]byte, error) {

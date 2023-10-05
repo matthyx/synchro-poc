@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/matthyx/synchro-poc/domain"
-	"github.com/matthyx/synchro-poc/utils"
 )
 
 func main() {
@@ -34,29 +32,46 @@ func main() {
 					break
 				}
 				// unmarshal message
-				var msg domain.Message
+				var msg domain.Generic
 				err = json.Unmarshal(data, &msg)
 				if err != nil {
 					logger.L().Error("cannot unmarshal message", helpers.Error(err))
 					continue
 				}
-				logger.L().Info("received message", helpers.Interface("type", msg.Type), helpers.String("kind", msg.Kind.Resource), helpers.String("key", msg.Key))
-				switch msg.Type {
-				case domain.Added:
-					resources[msg.Key] = msg.Object
-				case domain.Modified:
-					modified, err := jsonpatch.MergePatch(resources[msg.Key], msg.Patch)
+				logger.L().Info("received message", helpers.Interface("event", msg.Event.Value()))
+				switch *msg.Event {
+				case domain.EventAdd:
+					var add domain.Add
+					err = json.Unmarshal(data, &add)
 					if err != nil {
-						logger.L().Error("cannot merge patch", helpers.Error(err))
+						logger.L().Error("cannot unmarshal add", helpers.Error(err))
 						continue
 					}
-					resources[msg.Key] = modified
-					// send checksum for validation
-					hash, _ = utils.CanonicalHash(modified)
-				case domain.Deleted:
-					delete(resources, msg.Key)
-				case domain.Checksum:
-					hash, _ = utils.CanonicalHash(resources[msg.Key])
+					resources[add.Name] = []byte(add.Object)
+				case domain.EventChecksum:
+					var checksum domain.Checksum
+					err = json.Unmarshal(data, &checksum)
+					if err != nil {
+						logger.L().Error("cannot unmarshal checksum", helpers.Error(err))
+						continue
+					}
+					// TODO
+				case domain.EventDelete:
+					var del domain.Delete
+					err = json.Unmarshal(data, &del)
+					if err != nil {
+						logger.L().Error("cannot unmarshal delete", helpers.Error(err))
+						continue
+					}
+					delete(resources, del.Name)
+				case domain.EventPatch:
+					var patch domain.Patch
+					err = json.Unmarshal(data, &patch)
+					if err != nil {
+						logger.L().Error("cannot unmarshal patch", helpers.Error(err))
+						continue
+					}
+					// TODO
 				}
 				err = wsutil.WriteServerMessage(conn, op, hash[:])
 				if err != nil {

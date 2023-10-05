@@ -1,0 +1,177 @@
+asyncapi: '2.6.0'
+info:
+  title: Kubescape Synchronizer API
+  version: '1.0.0'
+  description: |
+    The Kubescape Synchronizer API used to synchronize objects between
+    Kubernetes clusters and a compatible backend.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  localhost:
+    url: localhost:8080
+    protocol: ws
+    description: Local broker
+defaultContentType: application/json
+channels:
+  /:
+    publish:
+      description: Send messages to the API
+      operationId: processReceivedMessage
+      message:
+        oneOf:
+          - $ref: '#/components/messages/add'
+          - $ref: '#/components/messages/checksum'
+          - $ref: '#/components/messages/delete'
+          - $ref: '#/components/messages/patch'
+
+    subscribe:
+      description: Messages that you receive from the API
+      operationId: sendMessage
+      message:
+        oneOf:
+          - $ref: '#/components/messages/add'
+          - $ref: '#/components/messages/delete'
+          - $ref: '#/components/messages/retrieve'
+          - $ref: '#/components/messages/updateShadow'
+components:
+  messages:
+    add:
+      description: Add a new object
+      payload:
+        $ref: '#/components/schemas/add'
+    checksum:
+      description: Send an object checksum to be verified
+      payload:
+        $ref: '#/components/schemas/checksum'
+    delete:
+      description: Delete an object
+      payload:
+        $ref: '#/components/schemas/delete'
+    generic:
+      description: A generic message sent to the API
+      payload:
+          $ref: '#/components/schemas/generic'
+    patch:
+      description: Send a patch to apply to an object
+      payload:
+        $ref: '#/components/schemas/patch'
+    retrieve:
+      description: Ask for an object to be sent back
+      payload:
+        $ref: '#/components/schemas/retrieve'
+    updateShadow:
+      description: Send a shadow copy of an object to be updated
+      payload:
+        $ref: '#/components/schemas/updateShadow'
+  schemas:
+    add:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+        object:
+          $ref: '#/components/schemas/object'
+    checksum:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+        object:
+          $ref: '#/components/schemas/object'
+    delete:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+    generic:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+    patch:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+        patch:
+          $ref: '#/components/schemas/object'
+    retrieve:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+    updateShadow:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        cluster:
+          $ref: '#/components/schemas/cluster'
+        kind:
+          $ref: '#/components/schemas/kind'
+        name:
+          $ref: '#/components/schemas/name'
+        object:
+          $ref: '#/components/schemas/object'
+    cluster:
+      type: string
+      description: name of the cluster
+    event:
+      type: string
+      description: type of event
+      enum:
+        - add
+        - checksum
+        - delete
+        - patch
+        - retrieve
+        - updateShadow
+    kind:
+      type: object
+      description: unambiguously identifies a resource
+      properties:
+        group:
+          type: string
+        version:
+          type: string
+        resource:
+          type: string
+    name:
+        type: string
+        description: name of the object
+    object:
+      type: string
+      format: binary
+      description: The object is encoded in JSON.
