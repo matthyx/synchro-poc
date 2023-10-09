@@ -1,9 +1,14 @@
 package utils
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/SergJa/jsonhash"
@@ -12,12 +17,29 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
-func CanonicalHash(in []byte) ([32]byte, error) {
-	return jsonhash.CalculateJsonHash(in, []string{
+func CanonicalHash(in []byte) (string, error) {
+	hash, err := jsonhash.CalculateJsonHash(in, []string{
 		".status.conditions", // avoid Pod.status.conditions.lastProbeTime: null
 	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func KeyToNsName(key string) (string, string) {
+	split := strings.Split(key, "/")
+	return split[0], split[1]
+}
+
+func NsNameToKey(ns, name string) string {
+	return strings.Join([]string{ns, name}, "/")
 }
 
 func CompareJson(a, b []byte) bool {
@@ -109,4 +131,38 @@ func typeAndKind(v interface{}) (reflect.Type, reflect.Kind) {
 		k = t.Kind()
 	}
 	return t, k
+}
+
+func NewClient() (dynamic.Interface, error) {
+	clusterConfig, err := getConfig()
+	if err != nil {
+		return nil, err
+	}
+	dynClient, err := dynamic.NewForConfig(clusterConfig)
+	if err != nil {
+		return nil, err
+	}
+	return dynClient, nil
+}
+
+func getConfig() (*rest.Config, error) {
+	// try in-cluster config first
+	clusterConfig, err := rest.InClusterConfig()
+	if err == nil {
+		return clusterConfig, nil
+	}
+	// fallback to kubeconfig
+	var kubeconfig *string
+	if home := homedir.HomeDir(); home != "" {
+		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+	} else {
+		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+	}
+	flag.Parse()
+	clusterConfig, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	if err == nil {
+		return clusterConfig, nil
+	}
+	// nothing works
+	return nil, errors.New("unable to find config")
 }

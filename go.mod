@@ -5,9 +5,10 @@ go 1.20
 require (
 	github.com/SergJa/jsonhash v0.0.0-20210531165746-fc45f346aa74
 	github.com/davecgh/go-spew v1.1.1
-	github.com/evanphx/json-patch/v5 v5.7.0
+	github.com/evanphx/json-patch v4.12.0+incompatible
 	github.com/gobwas/ws v1.3.0
 	github.com/kubescape/go-logger v0.0.21
+	github.com/panjf2000/ants/v2 v2.8.2
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4

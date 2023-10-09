@@ -7,6 +7,6 @@ type Checksum struct {
   Cluster string
   Kind *Kind
   Name string
-  Object string
+  Checksum string
   AdditionalProperties map[string]interface{}
 }

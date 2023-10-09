@@ -52,7 +52,7 @@ components:
     generic:
       description: A generic message sent to the API
       payload:
-          $ref: '#/components/schemas/generic'
+        $ref: '#/components/schemas/generic'
     patch:
       description: Send a patch to apply to an object
       payload:
@@ -66,6 +66,13 @@ components:
       payload:
         $ref: '#/components/schemas/updateShadow'
   schemas:
+    generic:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/event'
+        kind:
+          $ref: '#/components/schemas/kind'
     add:
       type: object
       properties:
@@ -90,8 +97,8 @@ components:
           $ref: '#/components/schemas/kind'
         name:
           $ref: '#/components/schemas/name'
-        object:
-          $ref: '#/components/schemas/object'
+        checksum:
+          $ref: '#/components/schemas/sum'
     delete:
       type: object
       properties:
@@ -103,11 +110,6 @@ components:
           $ref: '#/components/schemas/kind'
         name:
           $ref: '#/components/schemas/name'
-    generic:
-      type: object
-      properties:
-        event:
-          $ref: '#/components/schemas/event'
     patch:
       type: object
       properties:
@@ -169,9 +171,11 @@ components:
         resource:
           type: string
     name:
-        type: string
-        description: name of the object
+      type: string
+      description: name of the object
     object:
       type: string
-      format: binary
-      description: The object is encoded in JSON.
+      description: The object is encoded in JSON
+    sum:
+      type: string
+      description: The checksum of the object
